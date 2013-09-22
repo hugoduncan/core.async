@@ -133,3 +133,33 @@
            (put! c :enqueues #(deliver p :proceeded))  ;; enqueue a put
            (<!! c)        ;; make room in the buffer
            (deref p 250 :timeout)))))
+
+(def-go-fn f [arg c]
+  (>! c arg))
+
+(def-go-fn h [c]
+  (let [v (<! c)]
+    (>! c v)))
+
+(deftest go-fn-test
+  (testing "basic"
+    (let [c2 (chan 1)
+          t (timeout 1000)
+          c (go
+             (f ::v c2)
+             (<! c2))
+          [v vc] (alts!! [c t])]
+      (is (= ::v v))
+      (is (= c vc))
+      (is (not= t vc))))
+  (testing "blocked read"
+    (let [c2 (chan 1)
+          t (timeout 1000)
+          c (go
+             (h c2)                     ; reads from c2 so should block
+             (>! c2 ::v)
+             (<! c2))
+          [v vc] (alts!! [c t])]
+      (is (nil? v))
+      (is (not= c vc))
+      (is (= t vc)))))

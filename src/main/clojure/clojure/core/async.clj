@@ -355,6 +355,38 @@
           (ioc/run-state-machine-wrapped state#))))
      c#))
 
+
+(defmacro def-go-fn
+  "Defines a function that is to be called within a go block, and which may
+contain core.async go block primitives."
+  [name args & body]
+  (alter-var-root
+   #'clojure.core.async.impl.ioc-macros/async-custom-terminators
+   assoc name name)
+  `(def ~name
+     (fn [outer-state# blk# ~@args]
+       ;; we shouldn't need a channel to pass here, as the go-fn does
+       ;; not return anything.  But the generated state machine
+       ;; assumes it is set, (and maybe it is useful,) so...
+       (let [c# (chan 1)
+             f# ~(ioc/state-machine body 1 &env ioc/async-custom-terminators)
+             state# (-> (f#)
+                        (ioc/aset-all!
+                         ioc/USER-START-IDX c#
+                         ioc/BINDINGS-IDX (ioc/aget-object
+                                           outer-state# ioc/BINDINGS-IDX)))]
+         (ioc/run-state-machine-wrapped state#)
+         (let [ret# (impl/take!
+                     c#
+                     (#'ioc/fn-handler
+                      (fn [val#]
+                        (ioc/run-state-machine-wrapped
+                         (ioc/aset-all!
+                          outer-state# ioc/STATE-IDX blk#)))))]
+           (when ret#
+             (ioc/run-state-machine-wrapped
+              (ioc/aset-all! outer-state# ioc/STATE-IDX blk#))))))))
+
 (defonce ^:private ^Executor thread-macro-executor
   (Executors/newCachedThreadPool (conc/counted-thread-factory "async-thread-macro-%d" true)))
 
